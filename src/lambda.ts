@@ -71,34 +71,51 @@ export const handler: CloudFormationCustomResourceHandler = async (event, contex
 					await (async () => {
 						console.log(`Creating subscription for ${resourceProperties.fnName}`);
 
-						const subscriptionResponse = await apiRoot
-							.subscriptions()
-							.post({
-								body: {
-									key: subKey,
-									destination: {
-										type: 'SQS',
-										queueUrl: subConfig.queueUrl,
-										accessKey: subConfig.accessKey,
-										accessSecret: subConfig.secretKey,
-										region: subConfig.region,
-									},
-									changes: subConfig.changes,
-									messages: subConfig.messages,
-								},
-							})
-							.execute();
+						for (let attempts = 4; attempts >= 0; --attempts) {
+							try {
+								const subscriptionResponse = await apiRoot
+									.subscriptions()
+									.post({
+										body: {
+											key: subKey,
+											destination: {
+												type: 'SQS',
+												queueUrl: subConfig.queueUrl,
+												accessKey: subConfig.accessKey,
+												accessSecret: subConfig.secretKey,
+												region: subConfig.region,
+											},
+											changes: subConfig.changes,
+											messages: subConfig.messages,
+										},
+									})
+									.execute();
 
-						console.log(
-							`Subscription created with ID ${subscriptionResponse.body.id} and version ${subscriptionResponse.body.version}`,
-						);
+								console.log(
+									`Subscription created with ID ${subscriptionResponse.body.id} and version ${subscriptionResponse.body.version}`,
+								);
 
-						const physicalResourceId: PhysicalResourceId = {
-							subscriptionId: subscriptionResponse.body.id,
-							version: subscriptionResponse.body.version,
-						};
+								const physicalResourceId: PhysicalResourceId = {
+									subscriptionId: subscriptionResponse.body.id,
+									version: subscriptionResponse.body.version,
+								};
 
-						await sendResponse('SUCCESS', physicalResourceId, event, context);
+								await sendResponse('SUCCESS', physicalResourceId, event, context);
+
+								break;
+							} catch (e) {
+								if (!attempts) {
+									throw e;
+								}
+
+								console.log(
+									`[Attempt ${
+										5 - attempts
+									}/5] Unable to create the subscription; waiting for 5 seconds to try again`,
+								);
+								await new Promise((resolve) => setTimeout(resolve, 5000));
+							}
+						}
 					})();
 
 					break;

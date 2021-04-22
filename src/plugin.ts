@@ -177,7 +177,7 @@ class ServerlessPlugin {
 
 			resources[userResourceName] = userResource;
 
-			resources[userCredsResourceName] = {
+			const userCredsResource: CloudFormationResource = {
 				Type: 'AWS::IAM::AccessKey',
 				Properties: {
 					Status: 'Active',
@@ -186,6 +186,8 @@ class ServerlessPlugin {
 					},
 				},
 			};
+
+			resources[userCredsResourceName] = userCredsResource;
 
 			if (event.commerceTools.subscription) {
 				serverless.cli.log(
@@ -265,7 +267,7 @@ class ServerlessPlugin {
 						},
 						S3Key: this.s3CustomResourceArtifactPath,
 					},
-					Timeout: 10,
+					Timeout: 60,
 					Runtime: 'nodejs12.x',
 					Role: {
 						'Fn::GetAtt': [customResourceLambdaRoleName, 'Arn'],
