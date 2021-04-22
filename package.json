@@ -9,6 +9,9 @@
     "build:plugin": "parcel build src/plugin.ts --out-dir dist --out-file plugin.js --target node",
     "build:lambda": "parcel build src/lambda.ts --out-dir dist --out-file lambda.js --target node"
   },
+  "files": [
+	"dist"
+  ],
   "devDependencies": {
     "@commercetools/api-request-builder": "^5.6.3",
     "@commercetools/importapi-sdk": "^1.10.0",
