@@ -1,6 +1,6 @@
 {
-  "name": "commercetools-serverless-plugin",
-  "version": "1.0.0",
+  "name": "@dankochetov/commercetools-serverless-plugin",
+  "version": "1.0.2",
   "description": "Commercetools Serverless plugin",
   "main": "dist/plugin.js",
   "scripts": {
@@ -10,7 +10,7 @@
     "build:lambda": "parcel build src/lambda.ts --out-dir dist --out-file lambda.js --target node"
   },
   "files": [
-	"dist"
+    "dist"
   ],
   "devDependencies": {
     "@commercetools/api-request-builder": "^5.6.3",
@@ -47,5 +47,14 @@
   "dependencies": {
     "fs-extra": "^9.1.0",
     "source-map-support": "^0.5.19"
-  }
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dankochetov/commercetools-serverless-plugin.git"
+  },
+  "author": "Dan Kochetov <me@bloberenober.dev>",
+  "bugs": {
+    "url": "https://github.com/dankochetov/commercetools-serverless-plugin/issues"
+  },
+  "homepage": "https://github.com/dankochetov/commercetools-serverless-plugin#readme"
 }
