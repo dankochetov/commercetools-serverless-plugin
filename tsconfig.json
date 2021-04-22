@@ -1,0 +1,17 @@
+{
+  "compilerOptions": {
+    "rootDir": "./src",
+    "outDir": "./dist",
+    "esModuleInterop": true,
+	"noImplicitAny": true,
+	"strict": true,
+	"noEmitOnError": true,
+	"typeRoots": [
+	  "./node_modules/@types",
+	  "./@types"
+	]
+  },
+  "include": [
+	"./src/plugin.ts"
+  ]
+}
