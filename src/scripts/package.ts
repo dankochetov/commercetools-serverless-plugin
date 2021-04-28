@@ -11,6 +11,7 @@ import fs from 'fs-extra';
 		allowMissing: {
 			'node-fetch': ['encoding'],
 		},
+		ignores: ['../lib/ExtensionManager', '../lib/SubscriptionManager'],
 	});
 
 	const zip = new AdmZip();

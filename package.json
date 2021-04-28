@@ -1,13 +1,13 @@
 {
   "name": "@dankochetov/commercetools-serverless-plugin",
-  "version": "1.0.3",
+  "version": "2.0.0",
   "description": "Commercetools Serverless plugin",
   "main": "dist/plugin.js",
   "scripts": {
     "build": "npm run build:plugin && npm run build:lambda",
     "postbuild": "src/scripts/package.ts",
     "build:plugin": "parcel build src/plugin.ts --out-dir dist --out-file plugin.js --target node",
-    "build:lambda": "parcel build src/lambda.ts --out-dir dist --out-file lambda.js --target node"
+    "build:lambda": "parcel build src/lambda/index.ts --out-dir dist --out-file lambda.js --target node"
   },
   "files": [
     "dist"
@@ -45,6 +45,7 @@
   },
   "license": "MIT",
   "dependencies": {
+    "cloudform": "^6.1.0",
     "fs-extra": "^9.1.0",
     "source-map-support": "^0.5.19"
   },

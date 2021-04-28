@@ -1,10 +1,17 @@
 import 'source-map-support/register';
 
 import Serverless from 'serverless';
-import type { ChangeSubscription, MessageSubscription } from '@commercetools/platform-sdk';
 import path from 'path';
 import fs from 'fs-extra';
-import type { CloudFormationResource } from 'serverless/plugins/aws/provider/awsProvider';
+import { IAM, Lambda, SQS, Fn } from 'cloudform-types';
+import type { Policy as IAMUserPolicy } from 'cloudform-types/types/iam/user';
+
+import {
+	CTEvent,
+	CustomResourcePropertiesSource,
+	ExtensionEvent,
+	SubscriptionEvent,
+} from './lib/types';
 
 interface Options {}
 
@@ -16,28 +23,16 @@ interface Config {
 	authHost: string;
 }
 
-interface CTEvent {
-	commerceTools: {
-		subscription?: {
-			changes: ChangeSubscription[];
-			messages: MessageSubscription[];
-		} & (
-			| {
-					queueUrl: { Ref: string } | undefined;
-					queueArn: { 'Fn::GetAtt': string[] } | undefined;
-					createQueue: false | undefined;
-			  }
-			| {
-					queueUrl: { Ref: string } | undefined;
-					queueArn: { 'Fn::GetAtt': string[] } | undefined;
-					createQueue: true;
-			  }
-		);
-	};
+function isCTEvent(e: object): e is CTEvent {
+	return Object.prototype.hasOwnProperty.call(e, 'commerceTools');
 }
 
-function isCTEvent(e: object): e is CTEvent {
-	return e.hasOwnProperty('commerceTools');
+function isSubscriptionEvent(e: object): e is SubscriptionEvent {
+	return isCTEvent(e) && Object.prototype.hasOwnProperty.call(e.commerceTools, 'subscription');
+}
+
+function isExtensionEvent(e: object): e is ExtensionEvent {
+	return isCTEvent(e) && Object.prototype.hasOwnProperty.call(e.commerceTools, 'extension');
 }
 
 class ServerlessPlugin {
@@ -54,6 +49,7 @@ class ServerlessPlugin {
 					properties: {
 						changes: {
 							type: 'array',
+							minItems: 1,
 							items: {
 								type: 'object',
 								properties: {
@@ -65,6 +61,7 @@ class ServerlessPlugin {
 						},
 						messages: {
 							type: 'array',
+							minItems: 1,
 							items: {
 								type: 'object',
 								properties: {
@@ -80,8 +77,40 @@ class ServerlessPlugin {
 						queueArn: {
 							oneOf: [{ type: 'string' }, { type: 'object' }],
 						},
+						batchSize: { type: 'number' },
 						createQueue: { type: 'boolean' },
 					},
+					anyOf: [{ required: ['changes'] }, { required: ['messages'] }],
+				},
+				extension: {
+					type: 'object',
+					properties: {
+						timeoutInMs: { type: 'integer', minimum: 1, maximum: 2000 },
+						triggers: {
+							type: 'array',
+							minItems: 1,
+							items: {
+								type: 'object',
+								properties: {
+									resourceTypeId: { type: 'string' },
+									actions: {
+										type: 'array',
+										minItems: 1,
+										maxItems: 2,
+										uniqueItems: true,
+										items: {
+											type: 'string',
+											enum: ['Create', 'Update'],
+										},
+									},
+								},
+								required: ['resourceTypeId', 'actions'],
+								additionalProperties: false,
+							},
+						},
+					},
+					required: ['triggers'],
+					additionalProperties: false,
 				},
 			},
 			additionalProperties: false,
@@ -106,34 +135,40 @@ class ServerlessPlugin {
 		});
 	}
 
-	private transformCFResourceName(name: string): string {
-		name = name.replace('-', 'Dash').replace('_', 'Underscore');
-		return name[0].toUpperCase() + name.slice(1);
-	}
-
 	updateFunctionsEvents = () => {
 		const { serverless } = this;
 
-		serverless.cli.log('[CommerceTools] Updating functions events...');
+		const fns = this.listFunctions();
+		const subsList = Object.entries(fns).filter(([, { events }]) =>
+			events.some(isSubscriptionEvent),
+		);
+		const extsList = Object.entries(fns).filter(([, { events }]) =>
+			events.some(isExtensionEvent),
+		);
 
-		Object.entries(serverless.service.functions).forEach(([fnName, fn]) => {
-			let event: CTEvent | undefined;
-			fn.events?.forEach((curEvent) => {
-				if (!event && isCTEvent(curEvent)) {
-					event = curEvent;
-				}
-			});
+		if (subsList.length || extsList.length) {
+			serverless.cli.log('CommerceTools functions found:');
+			subsList.forEach(([fnName, { events }]) =>
+				serverless.cli.log(`  - ${fnName} - ${events.length} subscription(s)`),
+			);
+			extsList.forEach(([fnName, { events }]) =>
+				serverless.cli.log(`  - ${fnName} - ${events.length} extension(s)`),
+			);
+		}
 
-			if (!event) return;
+		Object.entries(fns).forEach(([fnName, { fn, events }]) => {
+			const fnResourceName = this.transformCFNResourceName(fnName);
 
-			const fnResourceName = this.transformCFResourceName(fnName);
-
-			fn.events.push({
-				sqs: {
-					arn: {
-						'Fn::GetAtt': [`${fnResourceName}SubscriptionQueue`, 'Arn'],
+			events.filter(isSubscriptionEvent).forEach((event, eventIndex) => {
+				fn.events.push({
+					sqs: {
+						arn: Fn.GetAtt(
+							this.getCustomResourceName(fnResourceName),
+							`SubscriptionQueueArn${eventIndex + 1}`,
+						).toJSON(),
+						batchSize: event.commerceTools.subscription.batchSize ?? 1,
 					},
-				},
+				});
 			});
 		});
 	};
@@ -141,114 +176,133 @@ class ServerlessPlugin {
 	addResources = () => {
 		const { serverless } = this;
 		const config = serverless.service.custom.commerceTools as Config;
+		const resources = serverless.service.provider.compiledCloudFormationTemplate.Resources;
 
-		Object.entries(serverless.service.functions).forEach(([fnName, fn]) => {
-			let event: CTEvent | undefined;
-			fn.events?.forEach((curEvent) => {
-				if (!event && isCTEvent(curEvent)) {
-					event = curEvent;
-				}
-			});
-
-			if (!event) return;
-
+		Object.entries(this.listFunctions()).forEach(([fnName, { events }]) => {
 			serverless.cli.log(`[CommerceTools] Creating resources for ${fnName}...`);
 
-			const fnResourceName = this.transformCFResourceName(fnName);
+			const fnResourceName = this.transformCFNResourceName(fnName);
 
 			const resourceNamePrefix = `${serverless.service.getServiceName()}-${serverless
 				.getProvider('aws')
 				.getStage()}-`;
 
-			const userResourceName = `${fnResourceName}ServiceUser`;
-			const userCredsResourceName = `${userResourceName}Creds`;
-			const customResourceName = `${fnResourceName}Subscription`;
-			const customResourceLambdaName = `${fnResourceName}SubscriptionTriggerLambdaFunction`;
-			const customResourceLambdaRoleName = `${fnResourceName}SubscriptionTriggerRole`;
+			let subscriptionEventIndex = 0;
+			let extensionEventIndex = 0;
 
-			const resources = serverless.service.provider.compiledCloudFormationTemplate.Resources;
-
-			const userResource: CloudFormationResource = {
-				Type: 'AWS::IAM::User',
-				Properties: {
-					UserName: `${resourceNamePrefix}${fnName}-ct-user`,
-				},
-			};
-
-			resources[userResourceName] = userResource;
-
-			const userCredsResource: CloudFormationResource = {
-				Type: 'AWS::IAM::AccessKey',
-				Properties: {
-					Status: 'Active',
-					UserName: {
-						Ref: userResourceName,
-					},
-				},
-			};
-
-			resources[userCredsResourceName] = userCredsResource;
-
-			if (event.commerceTools.subscription) {
-				serverless.cli.log(
-					`[CommerceTools] Creating subscription resources for ${fnName}...`,
-				);
-
-				if (event.commerceTools.subscription.createQueue) {
-					const queueResourceName = `${fnResourceName}SubscriptionQueue`;
-
-					resources[queueResourceName] = {
-						Type: 'AWS::SQS::Queue',
-						Properties: {
-							QueueName: `${resourceNamePrefix}${fnName}-subscription-queue`,
-						},
-					};
-
-					event.commerceTools.subscription.queueUrl = {
-						Ref: queueResourceName,
-					};
-					event.commerceTools.subscription.queueArn = {
-						'Fn::GetAtt': [queueResourceName, 'Arn'],
-					};
+			events.forEach((event) => {
+				let eventType: 'Subscription' | 'Extension';
+				let eventIndex: number;
+				switch (true) {
+					case isSubscriptionEvent(event):
+						eventType = 'Subscription';
+						eventIndex = subscriptionEventIndex++;
+						break;
+					case isExtensionEvent(event):
+						eventType = 'Extension';
+						eventIndex = extensionEventIndex++;
+						break;
+					default:
+						throw new Error('unknown event type');
 				}
 
-				userResource.Properties.Policies = [
-					{
-						PolicyName: 'AllowPushToSQS',
-						PolicyDocument: {
-							Version: '2012-10-17',
-							Statement: [
-								{
-									Effect: 'Allow',
-									Action: ['sqs:SendMessage'],
-									Resource: [event.commerceTools.subscription.queueArn],
-								},
-							],
-						},
-					},
-				];
-			}
+				const userResourceName = this.getUserResourceName(
+					fnResourceName,
+					eventType,
+					eventIndex,
+				);
+				const userCredsResourceName = this.getUserCredsResourceName(
+					fnResourceName,
+					eventType,
+					eventIndex,
+				);
 
-			resources[customResourceLambdaRoleName] = {
-				Type: 'AWS::IAM::Role',
-				Properties: {
-					AssumeRolePolicyDocument: {
-						Version: '2012-10-17',
-						Statement: [
-							{
-								Effect: 'Allow',
-								Principal: {
-									Service: ['lambda.amazonaws.com'],
-								},
-								Action: ['sts:AssumeRole'],
+				const userResource = new IAM.User({
+					UserName: `${resourceNamePrefix}${fnName}${eventType}${eventIndex + 1}`,
+				});
+				resources[userResourceName] = userResource;
+
+				resources[userCredsResourceName] = new IAM.AccessKey({
+					Status: 'Active',
+					UserName: Fn.Ref(userResourceName),
+				});
+
+				const userPolicies: IAMUserPolicy[] = [];
+
+				if (isSubscriptionEvent(event) && event.commerceTools.subscription.createQueue) {
+					const queueResourceName = `${fnResourceName}SubscriptionQueue${eventIndex + 1}`;
+
+					resources[queueResourceName] = new SQS.Queue({
+						QueueName: `${resourceNamePrefix}${fnName}-subscription-queue-${
+							eventIndex + 1
+						}`,
+					});
+
+					event.commerceTools.subscription.queueUrl = Fn.Ref(queueResourceName);
+					event.commerceTools.subscription.queueArn = Fn.GetAtt(queueResourceName, 'Arn');
+
+					userPolicies.push(
+						new IAM.User.Policy({
+							PolicyName: 'AllowPushToSQS',
+							PolicyDocument: {
+								Version: '2012-10-17',
+								Statement: [
+									{
+										Effect: 'Allow',
+										Action: 'sqs:SendMessage',
+										Resource: event.commerceTools.subscription.queueArn,
+									},
+								],
 							},
-						],
-					},
-					ManagedPolicyArns: [
-						'arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole',
+						}),
+					);
+				}
+
+				if (isExtensionEvent(event)) {
+					userPolicies.push(
+						new IAM.User.Policy({
+							PolicyName: 'AllowLambdaInvoke',
+							PolicyDocument: {
+								Version: '2012-10-17',
+								Statement: [
+									{
+										Effect: 'Allow',
+										Action: 'lambda:InvokeFunction',
+										Resource: Fn.GetAtt(
+											`${fnResourceName}LambdaFunction`,
+											'Arn',
+										),
+									},
+								],
+							},
+						}),
+					);
+				}
+
+				userResource.Properties.Policies = userPolicies;
+			});
+
+			const customResourceName = this.getCustomResourceName(fnResourceName);
+			const customResourceLambdaName = `${customResourceName}LambdaFunction`;
+			const customResourceLambdaRoleName = `${customResourceName}Role`;
+
+			resources[customResourceLambdaRoleName] = new IAM.Role({
+				AssumeRolePolicyDocument: {
+					Version: '2012-10-17',
+					Statement: [
+						{
+							Effect: 'Allow',
+							Principal: {
+								Service: ['lambda.amazonaws.com'],
+							},
+							Action: ['sts:AssumeRole'],
+						},
 					],
 				},
-			};
+				ManagedPolicyArns: [
+					'arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole',
+				],
+			});
 
 			if (!this.s3CustomResourceArtifactPath) {
 				this.s3CustomResourceArtifactPath =
@@ -257,53 +311,59 @@ class ServerlessPlugin {
 					) + '/commercetools-serverless-plugin-custom-resource.zip';
 			}
 
-			resources[customResourceLambdaName] = {
-				Type: 'AWS::Lambda::Function',
-				Properties: {
-					Handler: 'lambda.handler',
-					Code: {
-						S3Bucket: {
-							Ref: 'ServerlessDeploymentBucket',
-						},
-						S3Key: this.s3CustomResourceArtifactPath,
-					},
-					Timeout: 60,
-					Runtime: 'nodejs12.x',
-					Role: {
-						'Fn::GetAtt': [customResourceLambdaRoleName, 'Arn'],
-					},
+			resources[customResourceLambdaName] = new Lambda.Function({
+				Handler: 'lambda.handler',
+				FunctionName:
+					`${resourceNamePrefix}${fnName}`.slice(0, 64 - '-custom-resource'.length) +
+					'-custom-resource',
+				Code: {
+					S3Bucket: Fn.Ref('ServerlessDeploymentBucket'),
+					S3Key: this.s3CustomResourceArtifactPath,
 				},
+				Timeout: 60,
+				Runtime: 'nodejs12.x',
+				Role: Fn.GetAtt(customResourceLambdaRoleName, 'Arn'),
+			});
+
+			const customResourceProperties: CustomResourcePropertiesSource = {
+				ServiceToken: Fn.GetAtt(customResourceLambdaName, 'Arn'),
+				fnName,
+				authHost: config.authHost,
+				apiHost: config.apiHost,
+				projectKey: config.projectKey,
+				clientId: config.clientId,
+				clientSecret: config.clientSecret,
+				subscriptions: events.filter(isSubscriptionEvent).map((event, eventIndex) => ({
+					queueUrl: event.commerceTools.subscription.queueUrl,
+					queueArn: event.commerceTools.subscription.queueArn,
+					accessKey: Fn.Ref(
+						this.getUserCredsResourceName(fnResourceName, 'Subscription', eventIndex),
+					),
+					secretKey: Fn.GetAtt(
+						this.getUserCredsResourceName(fnResourceName, 'Subscription', eventIndex),
+						'SecretAccessKey',
+					),
+					region: serverless.service.provider.region,
+					messages: event.commerceTools.subscription.messages,
+					changes: event.commerceTools.subscription.changes,
+				})),
+				extensions: events.filter(isExtensionEvent).map((event, eventIndex) => ({
+					lambdaArn: Fn.GetAtt(`${fnResourceName}LambdaFunction`, 'Arn'),
+					timeoutInMs: event.commerceTools.extension.timeoutInMs,
+					accessKey: Fn.Ref(
+						this.getUserCredsResourceName(fnResourceName, 'Extension', eventIndex),
+					),
+					secretKey: Fn.GetAtt(
+						this.getUserCredsResourceName(fnResourceName, 'Extension', eventIndex),
+						'SecretAccessKey',
+					),
+					triggers: event.commerceTools.extension.triggers,
+				})),
 			};
 
 			resources[customResourceName] = {
 				Type: 'Custom::CommerceToolsSubscription',
-				Properties: {
-					ServiceToken: {
-						'Fn::GetAtt': [customResourceLambdaName, 'Arn'],
-					},
-					fnName,
-					authHost: config.authHost,
-					apiHost: config.apiHost,
-					projectKey: config.projectKey,
-					clientId: config.clientId,
-					clientSecret: config.clientSecret,
-					...(event.commerceTools.subscription
-						? {
-								subscription: {
-									queueUrl: event.commerceTools.subscription.queueUrl,
-									accessKey: {
-										Ref: userCredsResourceName,
-									},
-									secretKey: {
-										'Fn::GetAtt': [userCredsResourceName, 'SecretAccessKey'],
-									},
-									region: serverless.service.provider.region,
-									messages: event.commerceTools.subscription.messages,
-									changes: event.commerceTools.subscription.changes,
-								},
-						  }
-						: {}),
-				},
+				Properties: customResourceProperties,
 			};
 		});
 	};
@@ -317,6 +377,58 @@ class ServerlessPlugin {
 			Key: this.s3CustomResourceArtifactPath!,
 		});
 	};
+
+	private listFunctions() {
+		const { serverless } = this;
+		const res: Record<
+			string,
+			{
+				fn: Serverless.FunctionDefinitionHandler | Serverless.FunctionDefinitionImage;
+				events: CTEvent[];
+			}
+		> = {};
+
+		Object.entries(serverless.service.functions).forEach(([fnName, fn]) => {
+			fn.events?.forEach((event) => {
+				if (isCTEvent(event)) {
+					if (!res[fnName]) {
+						res[fnName] = {
+							fn,
+							events: [],
+						};
+					}
+					res[fnName].events.push(event);
+				}
+			});
+		});
+
+		return res;
+	}
+
+	private transformCFNResourceName(name: string): string {
+		name = name.replace('-', 'Dash').replace('_', 'Underscore');
+		return name[0].toUpperCase() + name.slice(1);
+	}
+
+	private getCustomResourceName(fnResourceName: string): string {
+		return `${fnResourceName}CommerceToolsResource`;
+	}
+
+	private getUserResourceName(
+		fnResourceName: string,
+		eventType: 'Subscription' | 'Extension',
+		eventIndex: number,
+	): string {
+		return `${fnResourceName}${eventType}ServiceUser${eventIndex + 1}`;
+	}
+
+	private getUserCredsResourceName(
+		fnResourceName: string,
+		eventType: 'Subscription' | 'Extension',
+		eventIndex: number,
+	): string {
+		return `${fnResourceName}${eventType}ServiceUserCreds${eventIndex + 1}`;
+	}
 
 	hooks = {
 		'before:package:createDeploymentArtifacts': this.updateFunctionsEvents,
