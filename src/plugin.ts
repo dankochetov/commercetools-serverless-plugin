@@ -66,6 +66,11 @@ class ServerlessPlugin {
 								type: 'object',
 								properties: {
 									resourceTypeId: { type: 'string' },
+									types: {
+										type: 'array',
+										minItems: 1,
+										items: { type: 'string' },
+									},
 								},
 								required: ['resourceTypeId'],
 								additionalProperties: false,

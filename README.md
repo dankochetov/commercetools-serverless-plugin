@@ -36,10 +36,14 @@ functions:
             batchSize: <number> # skip if queueArn is used
             queueArn: <arn> # skip if createQueue is used
             changes: # optional
-              - resourceTypeId: <resourceTypeId>
+              - resourceTypeId: product
               - ...
             messages: # optional
-              - resourceTypeId: <resourceTypeId>
+              - resourceTypeId: order
+                types: # optional
+                  - DeliveryAdded
+                  - OrderStateChanged
+                  - ...
               - ...
                 
 ```

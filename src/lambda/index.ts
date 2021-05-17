@@ -195,6 +195,8 @@ async function sendResponse(
 		Reason: 'See the details in CloudWatch Log Stream: ' + context.logStreamName,
 		PhysicalResourceId: physicalResourceId
 			? JSON.stringify(physicalResourceId)
+			: event.RequestType !== 'Create'
+			? event.PhysicalResourceId
 			: context.logStreamName,
 		StackId: event.StackId,
 		RequestId: event.RequestId,

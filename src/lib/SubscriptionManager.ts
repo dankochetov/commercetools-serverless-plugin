@@ -33,7 +33,11 @@ export default class SubscriptionManager {
 							messages: subConfig.messages,
 						},
 					})
-					.execute();
+					.execute()
+					.catch((e) => {
+						console.error(JSON.stringify(e));
+						throw e;
+					});
 
 				console.log(
 					`Subscription created with ID ${subscriptionResponse.body.id} and version ${subscriptionResponse.body.version}`,
@@ -73,19 +77,15 @@ export default class SubscriptionManager {
 			.subscriptions()
 			.withId({ ID: oldPhysicalResourceId.id })
 			.get()
-			.execute();
+			.execute()
+			.catch((e) => {
+				console.error(JSON.stringify(e));
+				throw e;
+			});
 
 		const update: SubscriptionUpdate = {
 			version: oldSub.body.version,
 			actions: [
-				{
-					action: 'setChanges',
-					changes: subConfig.changes,
-				},
-				{
-					action: 'setMessages',
-					messages: subConfig.messages,
-				},
 				{
 					action: 'changeDestination',
 					destination: {
@@ -99,6 +99,20 @@ export default class SubscriptionManager {
 			],
 		};
 
+		if (subConfig.changes) {
+			update.actions.push({
+				action: 'setChanges',
+				changes: subConfig.changes,
+			});
+		}
+
+		if (subConfig.messages) {
+			update.actions.push({
+				action: 'setMessages',
+				messages: subConfig.messages,
+			});
+		}
+
 		if (oldSub.body.key !== subKey) {
 			update.actions.push({ action: 'setKey', key: subKey });
 		}
@@ -109,7 +123,11 @@ export default class SubscriptionManager {
 			.post({
 				body: update,
 			})
-			.execute();
+			.execute()
+			.catch((e) => {
+				console.error(JSON.stringify(e));
+				throw e;
+			});
 
 		const physicalResourceId: PhysicalResourceId['subscriptions'][number] = {
 			id: res.body.id,
@@ -136,7 +154,11 @@ export default class SubscriptionManager {
 				.subscriptions()
 				.withId({ ID: physicalResourceId.id })
 				.delete({ queryArgs: { version: physicalResourceId.version } })
-				.execute();
+				.execute()
+				.catch((e) => {
+					console.error(JSON.stringify(e));
+					throw e;
+				});
 
 			console.log(
 				`Subscription with ID ${res.body.id} and version ${res.body.version} is deleted`,
