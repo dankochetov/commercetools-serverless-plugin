@@ -81,7 +81,7 @@ export type SubscriptionConfigSource = Omit<
 
 export interface ExtensionConfig {
 	lambdaArn: string;
-	timeoutInMs?: number;
+	timeoutInMs?: string;
 	accessKey: string;
 	secretKey: string;
 	triggers: ExtensionTrigger[];
@@ -89,9 +89,10 @@ export interface ExtensionConfig {
 
 export type ExtensionConfigSource = Omit<
 	ExtensionConfig,
-	'lambdaArn' | 'accessKey' | 'secretKey'
+	'lambdaArn' | 'accessKey' | 'secretKey' | 'timeoutInMs'
 > & {
 	lambdaArn: IntrinsicFunction | string;
 	accessKey: IntrinsicFunction | string;
 	secretKey: IntrinsicFunction | string;
+	timeoutInMs?: number;
 };

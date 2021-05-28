@@ -234,17 +234,19 @@ class ServerlessPlugin {
 
 				const userPolicies: IAMUserPolicy[] = [];
 
-				if (isSubscriptionEvent(event) && event.commerceTools.subscription.createQueue) {
-					const queueResourceName = `${fnResourceName}SubscriptionQueue${eventIndex + 1}`;
+				if (isSubscriptionEvent(event)) {
+					if (event.commerceTools.subscription.createQueue) {
+						const queueResourceName = `${fnResourceName}SubscriptionQueue${eventIndex + 1}`;
 
-					resources[queueResourceName] = new SQS.Queue({
-						QueueName: `${resourceNamePrefix}${fnName}-subscription-queue-${
-							eventIndex + 1
-						}`,
-					});
+						resources[queueResourceName] = new SQS.Queue({
+							QueueName: `${resourceNamePrefix}${fnName}-subscription-queue-${
+								eventIndex + 1
+							}`,
+						});
 
-					event.commerceTools.subscription.queueUrl = Fn.Ref(queueResourceName);
-					event.commerceTools.subscription.queueArn = Fn.GetAtt(queueResourceName, 'Arn');
+						event.commerceTools.subscription.queueUrl = Fn.Ref(queueResourceName);
+						event.commerceTools.subscription.queueArn = Fn.GetAtt(queueResourceName, 'Arn');
+					}
 
 					userPolicies.push(
 						new IAM.User.Policy({
