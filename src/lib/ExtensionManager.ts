@@ -22,7 +22,7 @@ export default class ExtensionManager {
 					.post({
 						body: {
 							key: extKey,
-							timeoutInMs: extConfig.timeoutInMs,
+							timeoutInMs: extConfig.timeoutInMs ? +extConfig.timeoutInMs : undefined,
 							triggers: extConfig.triggers,
 							destination: {
 								type: 'AWSLambda',
@@ -32,7 +32,11 @@ export default class ExtensionManager {
 							},
 						},
 					})
-					.execute();
+					.execute()
+					.catch((e) => {
+						console.error(JSON.stringify(e));
+						throw e;
+					});
 
 				console.log(
 					`Extension created with ID ${extensionResponse.body.id} and version ${extensionResponse.body.version}`,
@@ -73,7 +77,11 @@ export default class ExtensionManager {
 			.extensions()
 			.withId({ ID: oldPhysicalResourceId.id })
 			.get()
-			.execute();
+			.execute()
+			.catch((e) => {
+				console.error(JSON.stringify(e));
+				throw e;
+			});
 
 		const update: ExtensionUpdate = {
 			version: oldExt.body.version,
@@ -96,7 +104,10 @@ export default class ExtensionManager {
 		}
 
 		if (oldExt.body.timeoutInMs !== extConfig.timeoutInMs) {
-			update.actions.push({ action: 'setTimeoutInMs', timeoutInMs: extConfig.timeoutInMs });
+			update.actions.push({
+				action: 'setTimeoutInMs',
+				timeoutInMs: extConfig.timeoutInMs ? +extConfig.timeoutInMs : undefined,
+			});
 		}
 
 		const res = await apiRoot
@@ -105,7 +116,11 @@ export default class ExtensionManager {
 			.post({
 				body: update,
 			})
-			.execute();
+			.execute()
+			.catch((e) => {
+				console.error(JSON.stringify(e));
+				throw e;
+			});
 
 		const physicalResourceId: PhysicalResourceId['extensions'][number] = {
 			id: res.body.id,
@@ -132,7 +147,11 @@ export default class ExtensionManager {
 				.extensions()
 				.withId({ ID: physicalResourceId.id })
 				.delete({ queryArgs: { version: physicalResourceId.version } })
-				.execute();
+				.execute()
+				.catch((e) => {
+					console.error(JSON.stringify(e));
+					throw e;
+				});
 
 			console.log(
 				`Extension with ID ${res.body.id} and version ${res.body.version} is deleted`,
