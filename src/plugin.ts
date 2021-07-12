@@ -3,15 +3,10 @@ import 'source-map-support/register';
 import Serverless from 'serverless';
 import path from 'path';
 import fs from 'fs-extra';
-import { IAM, Lambda, SQS, Fn } from 'cloudform-types';
-import type { Policy as IAMUserPolicy } from 'cloudform-types/types/iam/user';
+import {Fn, IAM, Lambda, SQS} from 'cloudform-types';
+import type {Policy as IAMUserPolicy} from 'cloudform-types/types/iam/user';
 
-import {
-	CTEvent,
-	CustomResourcePropertiesSource,
-	ExtensionEvent,
-	SubscriptionEvent,
-} from './lib/types';
+import {CTEvent, CustomResourcePropertiesSource, ExtensionEvent, SubscriptionEvent,} from './lib/types';
 
 interface Options {}
 
@@ -90,7 +85,7 @@ class ServerlessPlugin {
 				extension: {
 					type: 'object',
 					properties: {
-						timeoutInMs: { type: 'integer', minimum: 1, maximum: 2000 },
+						timeoutInMs: { type: 'integer', minimum: 1, maximum: 10000 },
 						triggers: {
 							type: 'array',
 							minItems: 1,
