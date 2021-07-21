@@ -90,7 +90,7 @@ class ServerlessPlugin {
 				extension: {
 					type: 'object',
 					properties: {
-						timeoutInMs: { type: 'integer', minimum: 1, maximum: 2000 },
+						timeoutInMs: { type: 'integer', minimum: 1 },
 						triggers: {
 							type: 'array',
 							minItems: 1,
