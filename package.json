@@ -1,6 +1,6 @@
 {
   "name": "@dankochetov/commercetools-serverless-plugin",
-  "version": "2.3.0",
+  "version": "2.3.1",
   "description": "Commercetools Serverless plugin",
   "main": "dist/plugin.js",
   "scripts": {
