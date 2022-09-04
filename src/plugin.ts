@@ -108,6 +108,7 @@ class ServerlessPlugin {
 											enum: ['Create', 'Update'],
 										},
 									},
+                                    condition: { type: 'string' }
 								},
 								required: ['resourceTypeId', 'actions'],
 								additionalProperties: false,
