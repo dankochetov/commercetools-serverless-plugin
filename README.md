@@ -67,6 +67,7 @@ functions:
                 actions:
                   - Create
                   - Update
+                condition: shippingAddress(country="US") # optional
               - ...
 ```
 
